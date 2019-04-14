@@ -43,8 +43,9 @@ async def store_mp3_view(request):
 
     input_file = data['flac'].file
 
-    with open(filepath, 'rb') as file:
+    with open(filepath, 'wb') as file:
         content = input_file.read()
+        file.write(content)
 
         data = base64.b64encode(content).decode('ascii')
         r = await create_request(data)
