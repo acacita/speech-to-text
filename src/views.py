@@ -1,9 +1,13 @@
-import os
-from constants import API_KEY, recursive_to_json, RecognitionConfigShort, RecognitionAudioShort, RecognizeRequest, UPLOADS_DIR, CONFIDENT_ENOUGH
-import json
 import base64
+import json
+import os
 import aiohttp
+import asyncio
 from aiohttp import web
+from constants import API_KEY, recursive_to_json
+from constants import RecognitionConfigShort, RecognitionAudioShort, RecognizeRequest
+from constants import SpeechRecognitionService
+from constants import UPLOADS_DIR, CONFIDENT_ENOUGH
 
 
 async def create_request(b64: str):
@@ -11,6 +15,7 @@ async def create_request(b64: str):
         config=RecognitionConfigShort(
             encoding='FLAC',
             languageCode='ru-RU',
+            profanityFilter=True
         ),
         audio=RecognitionAudioShort(
             content=str(b64)
@@ -27,10 +32,20 @@ async def parse_response(response: json):
             return text
 
 
-async def store_mp3_view(request):
+async def fetch_text(service, request):
+    print('Fetching IP from {}'.format(service.name))
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(service.url.format(service.api_key), json=request) as resp:
+            result = await resp.json()
+            res_text = await parse_response(result)
+            return res_text
+
+
+async def transcribe(request):
     data = await request.post()
     if not data:
-        return web.Response(text='please send audio')
+        return web.Response(text='The audio field can not be empty', status=400)
 
     filename = data['flac'].filename
 
@@ -39,7 +54,7 @@ async def store_mp3_view(request):
     filepath = os.path.join(UPLOADS_DIR, filename)
 
     if file_type != 'flac':
-        return web.Response(text='please send flac only')
+        return web.Response(text='Only FLAC format is acceptable', status=400)
 
     input_file = data['flac'].file
 
@@ -50,19 +65,20 @@ async def store_mp3_view(request):
         data = base64.b64encode(content).decode('ascii')
         r = await create_request(data)
 
-        # with open(filepath, 'w+') as f:
-        #     f.write(str(r))
+        services = (
+            SpeechRecognitionService(name='google-cloud-speech-to-text',
+                                     url='https://speech.googleapis.com/v1/speech:recognize?alt=json&key={}',
+                                     api_key=API_KEY),
+        )
 
-        async with aiohttp.ClientSession() as session:
-            async with session.post('https://speech.googleapis.com/v1/speech:recognize?alt=json&key={}'.format(API_KEY),
-                                    json=r) as resp:
-                all_res = await resp.json()
-                print(all_res)
-                result = await parse_response(all_res)
-                print(result)
-                return web.Response(content_type='plain/text', text=str(result))
+        futures = [fetch_text(service, r) for service in services]
+
+        done, _ = await asyncio.wait(futures)
+        for f in done:
+            result = f.result()
+            return web.Response(content_type='plain/text', text=result)
 
 
 app = web.Application()
-app.add_routes([web.post('/store_mp3', store_mp3_view)])
+app.add_routes([web.post('/transcribe', transcribe)])
 web.run_app(app)
