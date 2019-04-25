@@ -30,10 +30,12 @@ async def parse_response(response: json):
         if response['results'][i]['alternatives'][0]['confidence'] > CONFIDENT_ENOUGH:
             text += response['results'][i]['alternatives'][0]['transcript']
             return text
+        else:
+            return ("Could not recognize your speech")
 
 
 async def fetch_text(service, request):
-    print('Fetching IP from {}'.format(service.name))
+    print('Fetching from {}'.format(service.name))
 
     async with aiohttp.ClientSession() as session:
         async with session.post(service.url.format(service.api_key), json=request) as resp:
